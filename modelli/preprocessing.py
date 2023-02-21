@@ -6,9 +6,9 @@ import re
 
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.externals import joblib
+import joblib
 from keras.utils.np_utils import to_categorical
-from keras.preprocessing.sequence import pad_sequences
+from keras.utils import pad_sequences
 
 from modelli.utils import Vocabulary
 
@@ -43,7 +43,7 @@ class IndexTransformer(BaseEstimator, TransformerMixin):
         """
         self._num_norm = num_norm
         self._use_char = use_char
-        self._word_vocab = Vocabulary(lower=lower,unk_token=False, specials=[])
+        self._word_vocab = Vocabulary(lower=False,specials=[])
         self._char_vocab = Vocabulary(lower=False)
         self._label_vocab = Vocabulary(lower=False, unk_token=False)
 

@@ -37,7 +37,7 @@ class F1score(Callback):
 
             label_true.extend(y_true)
             label_pred.extend(y_pred)
-
+        print(label_pred)
         score = f1_score(label_true, label_pred)
         print(' - f1: {:04.2f}'.format(score * 100))
         print(classification_report(label_true, label_pred))

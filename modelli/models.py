@@ -3,9 +3,19 @@ Model definition.
 """
 import json
 
-from keras.layers import Dense, LSTM, Bidirectional, Embedding, Input, Dropout, TimeDistributed
-from keras.layers.merge import Concatenate
-from keras.models import Model, model_from_json
+import importlib
+import modelli.layers 
+importlib.reload(modelli.layers)
+import tensorflow as tf
+from keras.layers import Dense, LSTM, Bidirectional, Embedding,  Dropout, TimeDistributed
+from keras import Input
+from keras.layers import Concatenate
+from keras import Model
+from keras.models import model_from_json
+import tensorflow_addons as tfa
+from keras.metrics import CategoricalCrossentropy, SparseCategoricalCrossentropy
+from keras.losses import categorical_crossentropy
+
 
 from modelli.layers import CRF
 
@@ -110,7 +120,7 @@ class BiLSTMCRF(object):
         z = Dense(self._fc_dim, activation='tanh')(z)
 
         if self._use_crf:
-            crf = CRF(self._num_labels, sparse_target=False)
+            crf =CRF(self._num_labels)
             loss = crf.loss_function
             pred = crf(z)
         else:

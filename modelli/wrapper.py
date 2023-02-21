@@ -3,9 +3,10 @@ Wrapper class.
 """
 from seqeval.metrics import f1_score
 import importlib
-from modelli.models import BiLSTMCRF, save_model, load_model
 import modelli.preprocessing 
 importlib.reload(modelli.preprocessing)
+from modelli.models import BiLSTMCRF, save_model, load_model
+
 from modelli.preprocessing import IndexTransformer
 from modelli.tagger import Tagger
 from modelli.utils import filter_embeddings

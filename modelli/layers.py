@@ -1,16 +1,17 @@
 from __future__ import absolute_import
 from __future__ import division
-
+import tensorflow as tf
 import keras.backend as K
 from keras import activations
 from keras import initializers
 from keras import regularizers
 from keras import constraints
-from keras.engine import Layer
-from keras.engine import InputSpec
-from keras.objectives import categorical_crossentropy
-from keras.objectives import sparse_categorical_crossentropy
-
+from keras.layers import Layer
+from keras.engine.input_spec import InputSpec
+from keras.metrics import categorical_crossentropy, sparse_categorical_crossentropy
+import json
+from tensorflow.python.framework.ops import disable_eager_execution
+disable_eager_execution()
 
 class CRF(Layer):
     """An implementation of linear chain conditional random field (CRF).
@@ -209,7 +210,7 @@ class CRF(Layer):
 
     def call(self, X, mask=None):
         if mask is not None:
-            assert K.ndim(mask) == 2, 'Input mask to CRF must have dim 2 if not None'
+            assert mask.shape.rank == 2, 'Input mask to CRF must have dim 2 if not None'
 
         if self.test_mode == 'viterbi':
             test_output = self.viterbi_decoding(X, mask)
@@ -218,7 +219,7 @@ class CRF(Layer):
 
         self.uses_learning_phase = True
         if self.learn_mode == 'join':
-            train_output = K.zeros_like(K.dot(X, self.kernel))
+            train_output = tf.zeros_like(tf.tensordot(X, self.kernel,1))
             out = K.in_train_phase(train_output, test_output)
         else:
             if self.test_mode == 'viterbi':
@@ -233,7 +234,7 @@ class CRF(Layer):
 
     def compute_mask(self, input, mask=None):
         if mask is not None and self.learn_mode == 'join':
-            return K.any(mask, axis=1)
+            return tf.raw_ops.Any(input=mask, axis=1)
         return mask
 
     def get_config(self):
@@ -268,9 +269,11 @@ class CRF(Layer):
                 assert self._inbound_nodes, 'CRF has not connected to any layer.'
                 assert not self._outbound_nodes, 'When learn_model="join", CRF must be the last layer.'
                 if self.sparse_target:
-                    y_true = K.one_hot(K.cast(y_true[:, :, 0], 'int32'), self.units)
+                    y_true = tf.one_hot(tf.cast(y_true[:, :, 0], 'int32'), self.units)
                 X = self._inbound_nodes[0].input_tensors[0]
-                mask = self._inbound_nodes[0].input_masks[0]
+                print(self.input_mask)
+                mask = self.input_mask # _inbound_nodes[0].input_masks[0]
+
                 nloglik = self.get_negative_log_likelihood(y_true, X, mask)
                 return nloglik
             return loss
@@ -289,17 +292,17 @@ class CRF(Layer):
 
     @staticmethod
     def _get_accuracy(y_true, y_pred, mask, sparse_target=False):
-        y_pred = K.argmax(y_pred, -1)
+        y_pred = tf.experimental.numpy.argmax(y_pred, -1)
         if sparse_target:
-            y_true = K.cast(y_true[:, :, 0], K.dtype(y_pred))
+            y_true = tf.cast(y_true[:, :, 0], y_pred.dtype.name)
         else:
-            y_true = K.argmax(y_true, -1)
-        judge = K.cast(K.equal(y_pred, y_true), K.floatx())
+            y_true = tf.experimental.numpy.argmax(y_true, -1)
+        judge = tf.cast(tf.experimental.numpy.equal(y_pred, y_true), K.floatx())
         if mask is None:
-            return K.mean(judge)
+            return tf.experimental.numpy.mean(judge)
         else:
-            mask = K.cast(mask, K.floatx())
-            return K.sum(judge * mask) / K.sum(mask)
+            mask = tf.cast(mask, K.floatx())
+            return tf.math.reduce_sum(judge * mask) / tf.math.reduce_sum(mask)
 
     @property
     def viterbi_acc(self):
@@ -323,31 +326,32 @@ class CRF(Layer):
 
     @staticmethod
     def softmaxNd(x, axis=-1):
-        m = K.max(x, axis=axis, keepdims=True)
-        exp_x = K.exp(x - m)
-        prob_x = exp_x / K.sum(exp_x, axis=axis, keepdims=True)
+        m = tf.experimental.numpy.max(x, axis=axis, keepdims=True)
+        exp_x = tf.experimental.numpy.exp(x - m)
+        prob_x = exp_x / tf.math.reduce_sum(exp_x, axis=axis, keepdims=True)
         return prob_x
 
     @staticmethod
     def shift_left(x, offset=1):
         assert offset > 0
-        return K.concatenate([x[:, offset:], K.zeros_like(x[:, :offset])], axis=1)
+        return tf.keras.layers.concatenate([x[:, offset:], tf.zeros_like(x[:, :offset])], axis=1)
 
     @staticmethod
     def shift_right(x, offset=1):
         assert offset > 0
-        return K.concatenate([K.zeros_like(x[:, :offset]), x[:, :-offset]], axis=1)
+        return tf.keras.layers.concatenate([tf.zeros_like(x[:, :offset]), x[:, :-offset]], axis=1)
 
     def add_boundary_energy(self, energy, mask, start, end):
-        start = K.expand_dims(K.expand_dims(start, 0), 0)
-        end = K.expand_dims(K.expand_dims(end, 0), 0)
+        start = tf.expand_dims(tf.expand_dims(start, 0), 0)
+        end = tf.expand_dims(tf.expand_dims(end, 0), 0)
         if mask is None:
-            energy = K.concatenate([energy[:, :1, :] + start, energy[:, 1:, :]], axis=1)
-            energy = K.concatenate([energy[:, :-1, :], energy[:, -1:, :] + end], axis=1)
+            energy = tf.keras.layers.concatenate([energy[:, :1, :] + start, energy[:, 1:, :]], axis=1)
+            energy = tf.keras.layers.concatenate([energy[:, :-1, :], energy[:, -1:, :] + end], axis=1)
         else:
-            mask = K.expand_dims(K.cast(mask, K.floatx()))
-            start_mask = K.cast(K.greater(mask, self.shift_right(mask)), K.floatx())
-            end_mask = K.cast(K.greater(self.shift_left(mask), mask), K.floatx())
+            a=tf.cast(mask, K.floatx())
+            mask = tf.expand_dims(a,-1)
+            start_mask = tf.cast(tf.math.greater(mask, self.shift_right(mask)), K.floatx())
+            end_mask = tf.cast(tf.math.greater(self.shift_left(mask), mask), K.floatx())
             energy = energy + start_mask * start
             energy = energy + end_mask * end
         return energy
@@ -363,15 +367,16 @@ class CRF(Layer):
     def get_energy(self, y_true, input_energy, mask):
         """Energy = a1' y1 + u1' y1 + y1' U y2 + u2' y2 + y2' U y3 + u3' y3 + an' y3
         """
-        input_energy = K.sum(input_energy * y_true, 2)  # (B, T)
-        chain_energy = K.sum(K.dot(y_true[:, :-1, :], self.chain_kernel) * y_true[:, 1:, :], 2)  # (B, T-1)
+        input_energy = tf.math.reduce_sum(input_energy * tf.cast(y_true,K.floatx()), 2)  # (B, T)
+        chain_energy = tf.math.reduce_sum(tf.tensordot(tf.cast(y_true[:, :-1, :],K.floatx()), self.chain_kernel,1) * tf.cast(y_true[:, 1:, :],K.floatx()), 2)  # (B, T-1)
 
         if mask is not None:
-            mask = K.cast(mask, K.floatx())
+            mask = tf.cast(mask, K.floatx())
+            print(mask)
             chain_mask = mask[:, :-1] * mask[:, 1:]  # (B, T-1), mask[:,:-1]*mask[:,1:] makes it work with any padding
             input_energy = input_energy * mask
             chain_energy = chain_energy * chain_mask
-        total_energy = K.sum(input_energy, -1) + K.sum(chain_energy, -1)  # (B, )
+        total_energy = tf.math.reduce_sum(input_energy, -1) + tf.math.reduce_sum(chain_energy, -1)  # (B, )
 
         return total_energy
 
@@ -379,16 +384,16 @@ class CRF(Layer):
         """Compute the loss, i.e., negative log likelihood (normalize by number of time steps)
            likelihood = 1/Z * exp(-E) ->  neg_log_like = - log(1/Z * exp(-E)) = logZ + E
         """
-        input_energy = self.activation(K.dot(X, self.kernel) + self.bias)
+        input_energy = self.activation(tf.tensordot(X, self.kernel,axes=1) + self.bias)
         if self.use_boundary:
             input_energy = self.add_boundary_energy(input_energy, mask, self.left_boundary, self.right_boundary)
         energy = self.get_energy(y_true, input_energy, mask)
-        logZ = self.get_log_normalization_constant(input_energy, mask, input_length=K.int_shape(X)[1])
+        logZ = self.get_log_normalization_constant(input_energy, mask, input_length=X.get_shape()[1])
         nloglik = logZ + energy
         if mask is not None:
-            nloglik = nloglik / K.sum(K.cast(mask, K.floatx()), 1)
+            nloglik = nloglik / tf.math.reduce_sum(tf.cast(mask, K.floatx()), 1)
         else:
-            nloglik = nloglik / K.cast(K.shape(X)[1], K.floatx())
+            nloglik = nloglik / tf.cast(K.shape(X)[1], K.floatx())
         return nloglik
 
     def step(self, input_energy_t, states, return_logZ=True):
@@ -396,22 +401,22 @@ class CRF(Layer):
         # where B = batch_size, F = output feature dim
         # Note: `i` is of float32, due to the behavior of `K.rnn`
         prev_target_val, i, chain_energy = states[:3]
-        t = K.cast(i[0, 0], dtype='int32')
+        t = tf.cast(i[0, 0], dtype='int32')
         if len(states) > 3:
-            if K.backend() == 'theano':
-                m = states[3][:, t:(t + 2)]
-            else:
-                m = K.tf.slice(states[3], [0, t], [-1, 2])
-            input_energy_t = input_energy_t * K.expand_dims(m[:, 0])
-            chain_energy = chain_energy * K.expand_dims(K.expand_dims(m[:, 0] * m[:, 1]))  # (1, F, F)*(B, 1, 1) -> (B, F, F)
+            #if K.backend() == 'theano':
+            #    m = states[3][:, t:(t + 2)]
+            #else:
+            m = tf.slice(states[3], [0, t], [-1, 2])
+            input_energy_t = input_energy_t * tf.expand_dims(m[:, 0],-1)
+            chain_energy = chain_energy * tf.expand_dims(tf.expand_dims(m[:, 0] * m[:, 1],-1),-1)  # (1, F, F)*(B, 1, 1) -> (B, F, F)
         if return_logZ:
-            energy = chain_energy + K.expand_dims(input_energy_t - prev_target_val, 2)  # shapes: (1, B, F) + (B, F, 1) -> (B, F, F)
-            new_target_val = K.logsumexp(-energy, 1)  # shapes: (B, F)
+            energy = chain_energy + tf.expand_dims(input_energy_t - prev_target_val, 2)  # shapes: (1, B, F) + (B, F, 1) -> (B, F, F)
+            new_target_val = tf.math.reduce_logsumexp(-energy, 1)  # shapes: (B, F)
             return new_target_val, [new_target_val, i + 1]
         else:
-            energy = chain_energy + K.expand_dims(input_energy_t + prev_target_val, 2)
-            min_energy = K.min(energy, 1)
-            argmin_table = K.cast(K.argmin(energy, 1), K.floatx())  # cast for tf-version `K.rnn`
+            energy = chain_energy + tf.expand_dims(input_energy_t + prev_target_val, 2)
+            min_energy = tf.raw_ops.Min(input=energy,axis= 1)
+            argmin_table = tf.cast(tf.raw_ops.ArgMin(input=energy,dimension= 1), K.floatx())  # cast for tf-version `K.rnn`
             return argmin_table, [min_energy, i + 1]
 
     def recursion(self, input_energy, mask=None, go_backwards=False, return_sequences=True, return_logZ=True, input_length=None):
@@ -430,19 +435,19 @@ class CRF(Layer):
         If `return_logZ = False`, compute the Viterbi's best path lookup table.
         """
         chain_energy = self.chain_kernel
-        chain_energy = K.expand_dims(chain_energy, 0)  # shape=(1, F, F): F=num of output features. 1st F is for t-1, 2nd F for t
-        prev_target_val = K.zeros_like(input_energy[:, 0, :])  # shape=(B, F), dtype=float32
+        chain_energy = tf.expand_dims(chain_energy, 0)  # shape=(1, F, F): F=num of output features. 1st F is for t-1, 2nd F for t
+        prev_target_val = tf.zeros_like(input_energy[:, 0, :])  # shape=(B, F), dtype=float32
 
         if go_backwards:
-            input_energy = K.reverse(input_energy, 1)
+            input_energy = tf.reverse(input_energy, 1)
             if mask is not None:
-                mask = K.reverse(mask, 1)
+                mask = tf.reverse(mask, 1)
 
-        initial_states = [prev_target_val, K.zeros_like(prev_target_val[:, :1])]
+        initial_states = [prev_target_val, tf.zeros_like(prev_target_val[:, :1])]
         constants = [chain_energy]
 
         if mask is not None:
-            mask2 = K.cast(K.concatenate([mask, K.zeros_like(mask[:, :1])], axis=1), K.floatx())
+            mask2 = tf.cast(tf.keras.layers.concatenate([mask, tf.zeros_like(mask[:, :1])], axis=1), K.floatx())
             constants.append(mask2)
 
         def _step(input_energy_i, states):
@@ -453,7 +458,7 @@ class CRF(Layer):
 
         if return_sequences:
             if go_backwards:
-                target_val_seq = K.reverse(target_val_seq, 1)
+                target_val_seq = tf.reverse(target_val_seq, 1)
             return target_val_seq
         else:
             return target_val_last
@@ -465,48 +470,56 @@ class CRF(Layer):
         return self.recursion(input_energy, go_backwards=True, **kwargs)
 
     def get_marginal_prob(self, X, mask=None):
-        input_energy = self.activation(K.dot(X, self.kernel) + self.bias)
+        input_energy = self.activation(tf.tensordot(X, self.kernel,1) + self.bias)
         if self.use_boundary:
             input_energy = self.add_boundary_energy(input_energy, mask, self.left_boundary, self.right_boundary)
-        input_length = K.int_shape(X)[1]
+        input_length = self.int_shape(X)[1]
         alpha = self.forward_recursion(input_energy, mask=mask, input_length=input_length)
         beta = self.backward_recursion(input_energy, mask=mask, input_length=input_length)
         if mask is not None:
-            input_energy = input_energy * K.expand_dims(K.cast(mask, K.floatx()))
+            input_energy = input_energy * tf.expand_dims(tf.cast(mask, K.floatx()),-1)
         margin = -(self.shift_right(alpha) + input_energy + self.shift_left(beta))
         return self.softmaxNd(margin)
 
     def viterbi_decoding(self, X, mask=None):
-        input_energy = self.activation(K.dot(X, self.kernel) + self.bias)
+        input_energy = self.activation(tf.tensordot(X, self.kernel,1) + self.bias)
         if self.use_boundary:
             input_energy = self.add_boundary_energy(input_energy, mask, self.left_boundary, self.right_boundary)
 
         argmin_tables = self.recursion(input_energy, mask, return_logZ=False)
-        argmin_tables = K.cast(argmin_tables, 'int32')
+        argmin_tables = tf.cast(argmin_tables, 'int32')
 
         # backward to find best path, `initial_best_idx` can be any, as all elements in the last argmin_table are the same
-        argmin_tables = K.reverse(argmin_tables, 1)
-        initial_best_idx = [K.expand_dims(argmin_tables[:, 0, 0])]  # matrix instead of vector is required by tf `K.rnn`
-        if K.backend() == 'theano':
-            initial_best_idx = [K.T.unbroadcast(initial_best_idx[0], 1)]
+        argmin_tables = tf.reverse(argmin_tables, tf.constant([1]))
+        initial_best_idx = [tf.expand_dims(argmin_tables[:, 0, 0],-1)]  # matrix instead of vector is required by tf `K.rnn`
+        #if K.backend() == 'theano':
+        #    initial_best_idx = [K.T.unbroadcast(initial_best_idx[0], 1)]
 
         def gather_each_row(params, indices):
             n = K.shape(indices)[0]
-            if K.backend() == 'theano':
-                return params[K.T.arange(n), indices]
-            else:
-                indices = K.transpose(K.stack([K.tf.range(n), indices]))
-                return K.tf.gather_nd(params, indices)
+            #if K.backend() == 'theano':
+            #    return params[K.T.arange(n), indices]
+            #else:
+            indices = K.transpose(K.stack([K.tf.range(n), indices]))
+            return K.tf.gather_nd(params, indices)
 
         def find_path(argmin_table, best_idx):
             next_best_idx = gather_each_row(argmin_table, best_idx[0][:, 0])
-            next_best_idx = K.expand_dims(next_best_idx)
-            if K.backend() == 'theano':
-                next_best_idx = K.T.unbroadcast(next_best_idx, 1)
+            next_best_idx = tf.expand_dims(next_best_idx,-1)
+            #if K.backend() == 'theano':
+            #    next_best_idx = K.T.unbroadcast(next_best_idx, 1)
             return next_best_idx, [next_best_idx]
 
-        _, best_paths, _ = K.rnn(find_path, argmin_tables, initial_best_idx, input_length=K.int_shape(X)[1], unroll=self.unroll)
-        best_paths = K.reverse(best_paths, 1)
-        best_paths = K.squeeze(best_paths, 2)
+        _, best_paths, _ = K.rnn(find_path, argmin_tables, initial_best_idx, input_length=X.get_shape()[1], unroll=self.unroll)
+        best_paths = tf.reverse(best_paths,tf.constant([1]))
+        best_paths = tf.squeeze(best_paths, [2])
 
-        return K.one_hot(best_paths, self.units)
+        return tf.one_hot(best_paths, self.units)
+    
+    def int_shape(x):
+        '''Returns the shape of a tensor as a tuple of
+        integers or None entries.
+        Note that this function only works with TensorFlow.
+        '''
+        shape = x.get_shape()
+        return tuple([i.__int__() for i in shape])

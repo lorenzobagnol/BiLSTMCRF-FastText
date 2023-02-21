@@ -1,5 +1,8 @@
 """Training-related module.
 """
+import importlib
+import modelli.preprocessing
+importlib.reload(modelli.preprocessing)
 from modelli.callbacks import F1score
 from modelli.utils import NERSequence
 
@@ -44,7 +47,7 @@ class Trainer(object):
             f1 = F1score(valid_seq, preprocessor=self._preprocessor)
             callbacks = [f1] + callbacks if callbacks else [f1]
 
-        self._model.fit_generator(generator=train_seq,
+        self._model.fit(x=train_seq, validation_data=valid_seq,
                                   epochs=epochs,
                                   callbacks=callbacks,
                                   verbose=verbose,
