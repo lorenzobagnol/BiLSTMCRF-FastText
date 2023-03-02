@@ -6,12 +6,10 @@ from keras import activations
 from keras import initializers
 from keras import regularizers
 from keras import constraints
-from keras.layers import Layer
-from keras.engine.input_spec import InputSpec
+from keras.layers import Layer, InputSpec
 from keras.metrics import categorical_crossentropy, sparse_categorical_crossentropy
 import json
-from tensorflow.python.framework.ops import disable_eager_execution
-disable_eager_execution()
+
 
 class CRF(Layer):
     """An implementation of linear chain conditional random field (CRF).
@@ -208,23 +206,23 @@ class CRF(Layer):
                                                   constraint=self.boundary_constraint)
         self.built = True
 
-    def call(self, X, mask=None):
+    def call(self, inputs, mask=None, training=None):
         if mask is not None:
             assert mask.shape.rank == 2, 'Input mask to CRF must have dim 2 if not None'
 
         if self.test_mode == 'viterbi':
-            test_output = self.viterbi_decoding(X, mask)
+            test_output = self.viterbi_decoding(inputs, mask)
         else:
-            test_output = self.get_marginal_prob(X, mask)
+            test_output = self.get_marginal_prob(inputs, mask)
 
         self.uses_learning_phase = True
         if self.learn_mode == 'join':
-            train_output = tf.zeros_like(tf.tensordot(X, self.kernel,1))
-            out = K.in_train_phase(train_output, test_output)
+            train_output = tf.zeros_like(tf.tensordot(inputs, self.kernel,1))
+            out = train_output if training else test_output # K.in_train_phase(train_output, test_output)
         else:
             if self.test_mode == 'viterbi':
-                train_output = self.get_marginal_prob(X, mask)
-                out = K.in_train_phase(train_output, test_output)
+                train_output = self.get_marginal_prob(inputs, mask)
+                out = train_output if training else  test_output # K.in_train_phase(train_output, test_output)
             else:
                 out = test_output
         return out
@@ -265,14 +263,13 @@ class CRF(Layer):
     @property
     def loss_function(self):
         if self.learn_mode == 'join':
-            def loss(y_true, y_pred):
-                assert self._inbound_nodes, 'CRF has not connected to any layer.'
-                assert not self._outbound_nodes, 'When learn_model="join", CRF must be the last layer.'
+            def loss(y_true, y_pred, inputs):
+                # assert self.input, 'CRF has not connected to any layer.'
+                # assert not self.output, 'When learn_model="join", CRF must be the last layer.'
                 if self.sparse_target:
                     y_true = tf.one_hot(tf.cast(y_true[:, :, 0], 'int32'), self.units)
-                X = self._inbound_nodes[0].input_tensors[0]
-                print(self.input_mask)
-                mask = self.input_mask # _inbound_nodes[0].input_masks[0]
+                X = inputs
+                mask = self.compute_mask(inputs) # _inbound_nodes[0].input_masks[0]
 
                 nloglik = self.get_negative_log_likelihood(y_true, X, mask)
                 return nloglik
@@ -372,7 +369,6 @@ class CRF(Layer):
 
         if mask is not None:
             mask = tf.cast(mask, K.floatx())
-            print(mask)
             chain_mask = mask[:, :-1] * mask[:, 1:]  # (B, T-1), mask[:,:-1]*mask[:,1:] makes it work with any padding
             input_energy = input_energy * mask
             chain_energy = chain_energy * chain_mask
@@ -381,6 +377,7 @@ class CRF(Layer):
         return total_energy
 
     def get_negative_log_likelihood(self, y_true, X, mask):
+        
         """Compute the loss, i.e., negative log likelihood (normalize by number of time steps)
            likelihood = 1/Z * exp(-E) ->  neg_log_like = - log(1/Z * exp(-E)) = logZ + E
         """
@@ -455,7 +452,6 @@ class CRF(Layer):
 
         target_val_last, target_val_seq, _ = K.rnn(_step, input_energy, initial_states, constants=constants,
                                                    input_length=input_length, unroll=self.unroll)
-
         if return_sequences:
             if go_backwards:
                 target_val_seq = tf.reverse(target_val_seq, 1)
@@ -500,8 +496,8 @@ class CRF(Layer):
             #if K.backend() == 'theano':
             #    return params[K.T.arange(n), indices]
             #else:
-            indices = K.transpose(K.stack([K.tf.range(n), indices]))
-            return K.tf.gather_nd(params, indices)
+            indices = K.transpose(K.stack([tf.range(n), indices]))
+            return tf.gather_nd(params, indices)
 
         def find_path(argmin_table, best_idx):
             next_best_idx = gather_each_row(argmin_table, best_idx[0][:, 0])

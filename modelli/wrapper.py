@@ -3,9 +3,9 @@ Wrapper class.
 """
 from seqeval.metrics import f1_score
 import importlib
-import modelli.preprocessing 
-importlib.reload(modelli.preprocessing)
-from modelli.models import BiLSTMCRF, save_model, load_model
+import modelli.models 
+importlib.reload(modelli.models)
+from modelli.models import BiLSTMCRF, Bi, save_model, load_model
 
 from modelli.preprocessing import IndexTransformer
 from modelli.tagger import Tagger
@@ -46,9 +46,9 @@ class Sequence(object):
     def fit_vocab(self, x_train, y_train):
         p = IndexTransformer(initial_vocab=self.initial_vocab, use_char=self.use_char, lower=False)
         p.build_vocab(x_train, y_train)
-        embeddings = self.embeddings.vectors_vocab
+        embeddings = filter_embeddings(self.embeddings, p._word_vocab.vocab, self.word_embedding_dim)
 
-        model = BiLSTMCRF(char_vocab_size=p.char_vocab_size,
+        model = Bi(char_vocab_size=p.char_vocab_size,
                           word_vocab_size=p.word_vocab_size,
                           num_labels=p.label_size,
                           word_embedding_dim=self.word_embedding_dim,
@@ -60,8 +60,8 @@ class Sequence(object):
                           embeddings=embeddings,
                           use_char=self.use_char,
                           use_crf=self.use_crf)
-        model, self.loss = model.build()
-        model.compile(loss=self.loss, optimizer=self.optimizer)
+        
+        model.compile(loss=model.loss, optimizer=self.optimizer)
         self.p = p
         self.model=model
 
