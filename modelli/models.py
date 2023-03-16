@@ -15,7 +15,7 @@ from keras.models import model_from_json
 import tensorflow_addons as tfa
 from keras.metrics import CategoricalCrossentropy, SparseCategoricalCrossentropy
 from keras.losses import categorical_crossentropy
-
+from keras.engine import data_adapter
 
 from modelli.layers import CRF
 
@@ -293,34 +293,40 @@ class Bi(Model):
         self.dense = Dense(self._fc_dim, activation='tanh')
 
         if self._use_crf:
-            self.last_layer = CRF(self._num_labels,sparse_target=False)
+            self.last_layer = CRF(self._num_labels)
             self.loss = self.last_layer.loss_function
 
         else:
-            self.loss = 'categorical_crossentropy'
+            self.loss = categorical_crossentropy
             self.last_layer = Dense(self._num_labels, activation='softmax')
 
 
-    def call(self, inputs, training=False):
+    def call(self, inputs, training=None):
         # word_ids = Input(batch_shape=(None, None), dtype='int32', name='word_input')
             # inputs = [word_ids]
         word_embeddings=self.word_embeddings(inputs[0])
+        word_mask = self.word_embeddings.compute_mask(inputs[0])
+        
         if self._use_char:
                 # char_ids = Input(batch_shape=(None, None, None), dtype='int32', name='char_input')
                 # inputs.append(char_ids)
             char_embeddings=self.char_embeddings(inputs[1])
-            char_embeddings=self.char_bilstm(char_embeddings)
+            char_mask=self.char_embeddings.compute_mask(inputs[1])
+            bilstm_char_mask=self.char_bilstm.compute_mask(char_embeddings,mask=char_mask)
+            char_embeddings=self.char_bilstm(char_embeddings, training=training, mask=char_mask)
+            char_mask=bilstm_char_mask
+            mask=self.concat.compute_mask([word_embeddings, char_embeddings],[word_mask, char_mask])
             word_embeddings = self.concat([word_embeddings, char_embeddings])
-        word_embeddings=self.dropout(word_embeddings)
-        z=self.bilstm(word_embeddings)
-        self.z=self.dense(z)
+            
+        word_embeddings=self.dropout(word_embeddings, training=training)
+        z=self.bilstm(word_embeddings, training=training)
+        mask=self.bilstm.compute_mask(word_embeddings,mask)
+        z=self.dense(z)
         if self._use_crf:
-            pred=self.last_layer(self.z,training=training)
+            pred=self.last_layer(z, mask=mask, training=training)
         else:
-            pred=self.last_layer(self.z)
+            pred=self.last_layer(z)
         return pred
 
-    def compute_loss(self, x, y, y_pred, sample_weight):
-        return self.loss(y,y_pred, self.z)
-    
-    
+  
+

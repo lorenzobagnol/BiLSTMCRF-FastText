@@ -2,7 +2,8 @@
 """
 import importlib
 import modelli.preprocessing
-importlib.reload(modelli.preprocessing)
+import modelli.utils
+importlib.reload(modelli.utils)
 from modelli.callbacks import F1score
 from modelli.utils import NERSequence
 
@@ -46,8 +47,8 @@ class Trainer(object):
             valid_seq = NERSequence(x_valid, y_valid, batch_size, self._preprocessor.transform)
             f1 = F1score(valid_seq, preprocessor=self._preprocessor)
             callbacks = [f1] + callbacks if callbacks else [f1]
-
-        self._model.fit(x=train_seq, #validation_data=valid_seq,
+        
+        self._model.fit(x=train_seq, validation_data=valid_seq,
                                   epochs=epochs,
                                   callbacks=callbacks,
                                   verbose=verbose,

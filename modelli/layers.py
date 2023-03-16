@@ -205,8 +205,15 @@ class CRF(Layer):
                                                   regularizer=self.boundary_regularizer,
                                                   constraint=self.boundary_constraint)
         self.built = True
+        
+    def compute_mask(self, input, mask=None):
+        if mask is not None and self.learn_mode == 'join':
+            return K.any(mask, axis=1)
+        return mask
 
     def call(self, inputs, mask=None, training=None):
+        self.z=inputs
+        self.in_mask=mask
         if mask is not None:
             assert mask.shape.rank == 2, 'Input mask to CRF must have dim 2 if not None'
 
@@ -229,11 +236,6 @@ class CRF(Layer):
 
     def compute_output_shape(self, input_shape):
         return input_shape[:2] + (self.units,)
-
-    def compute_mask(self, input, mask=None):
-        if mask is not None and self.learn_mode == 'join':
-            return tf.raw_ops.Any(input=mask, axis=1)
-        return mask
 
     def get_config(self):
         config = {'units': self.units,
@@ -263,14 +265,13 @@ class CRF(Layer):
     @property
     def loss_function(self):
         if self.learn_mode == 'join':
-            def loss(y_true, y_pred, inputs):
+            def loss(y_true, y_pred):
                 # assert self.input, 'CRF has not connected to any layer.'
                 # assert not self.output, 'When learn_model="join", CRF must be the last layer.'
                 if self.sparse_target:
                     y_true = tf.one_hot(tf.cast(y_true[:, :, 0], 'int32'), self.units)
-                X = inputs
-                mask = self.compute_mask(inputs) # _inbound_nodes[0].input_masks[0]
-
+                X = self.z
+                mask = self.in_mask # self._inbound_nodes[0].input_masks[0]
                 nloglik = self.get_negative_log_likelihood(y_true, X, mask)
                 return nloglik
             return loss
@@ -289,14 +290,14 @@ class CRF(Layer):
 
     @staticmethod
     def _get_accuracy(y_true, y_pred, mask, sparse_target=False):
-        y_pred = tf.experimental.numpy.argmax(y_pred, -1)
+        y_pred = tf.math.argmax(y_pred, -1)
         if sparse_target:
             y_true = tf.cast(y_true[:, :, 0], y_pred.dtype.name)
         else:
-            y_true = tf.experimental.numpy.argmax(y_true, -1)
-        judge = tf.cast(tf.experimental.numpy.equal(y_pred, y_true), K.floatx())
+            y_true = tf.math.argmax(y_true, -1)
+        judge = tf.cast(tf.math.equal(y_pred, y_true), K.floatx())
         if mask is None:
-            return tf.experimental.numpy.mean(judge)
+            return tf.math.reduce_mean(judge)
         else:
             mask = tf.cast(mask, K.floatx())
             return tf.math.reduce_sum(judge * mask) / tf.math.reduce_sum(mask)
@@ -323,8 +324,8 @@ class CRF(Layer):
 
     @staticmethod
     def softmaxNd(x, axis=-1):
-        m = tf.experimental.numpy.max(x, axis=axis, keepdims=True)
-        exp_x = tf.experimental.numpy.exp(x - m)
+        m = tf.math.reduce_max(x, axis=axis, keepdims=True)
+        exp_x = tf.math.exp(x - m)
         prob_x = exp_x / tf.math.reduce_sum(exp_x, axis=axis, keepdims=True)
         return prob_x
 
@@ -377,7 +378,6 @@ class CRF(Layer):
         return total_energy
 
     def get_negative_log_likelihood(self, y_true, X, mask):
-        
         """Compute the loss, i.e., negative log likelihood (normalize by number of time steps)
            likelihood = 1/Z * exp(-E) ->  neg_log_like = - log(1/Z * exp(-E)) = logZ + E
         """
@@ -511,11 +511,3 @@ class CRF(Layer):
         best_paths = tf.squeeze(best_paths, [2])
 
         return tf.one_hot(best_paths, self.units)
-    
-    def int_shape(x):
-        '''Returns the shape of a tensor as a tuple of
-        integers or None entries.
-        Note that this function only works with TensorFlow.
-        '''
-        shape = x.get_shape()
-        return tuple([i.__int__() for i in shape])
