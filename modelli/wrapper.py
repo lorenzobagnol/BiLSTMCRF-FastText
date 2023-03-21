@@ -2,10 +2,11 @@
 Wrapper class.
 """
 from seqeval.metrics import f1_score
+import modelli.models
 import importlib
-import modelli.models 
 importlib.reload(modelli.models)
-from modelli.models import BiLSTMCRF, Bi, save_model, load_model
+from modelli.models import Bi
+from keras.models import  load_model
 
 from modelli.preprocessing import IndexTransformer
 from modelli.tagger import Tagger
@@ -44,7 +45,7 @@ class Sequence(object):
         self.optimizer = optimizer
 
     def fit_vocab(self, x_train, y_train):
-        p = IndexTransformer(initial_vocab=self.initial_vocab, use_char=self.use_char, lower=False)
+        p = IndexTransformer(initial_vocab=self.initial_vocab, use_char=self.use_char)
         p.build_vocab(x_train, y_train)
         embeddings = filter_embeddings(self.embeddings, p._word_vocab.vocab, self.word_embedding_dim)
 
@@ -125,14 +126,16 @@ class Sequence(object):
 
         return self.tagger.analyze(text)
 
-    def save(self, weights_file, params_file, preprocessor_file):
+    def save(self, model_file, model_json, preprocessor_file):
         self.p.save(preprocessor_file)
-        save_model(self.model, weights_file, params_file)
+        self.model.save( model_file)
 
     @classmethod
-    def load(cls, weights_file, params_file, preprocessor_file):
+    def load(cls, model_folder, model_json, preprocessor_file):
         self = cls()
         self.p = IndexTransformer.load(preprocessor_file)
-        self.model = load_model(weights_file, params_file)
+        # self.model = model_from_json(open(model_json).read())
+        # self.model.load_weights(os.path.join(os.path.dirname(model_folder), 'model_weights.h5'))
+        self.model = load_model(filepath=model_folder, compile=False) # , custom_objects= {'negative_log_likelihood': CRF.loss_function })
 
         return self

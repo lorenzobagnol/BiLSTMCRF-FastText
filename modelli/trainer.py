@@ -1,9 +1,5 @@
 """Training-related module.
 """
-import importlib
-import modelli.preprocessing
-import modelli.utils
-importlib.reload(modelli.utils)
 from modelli.callbacks import F1score
 from modelli.utils import NERSequence
 

@@ -274,6 +274,7 @@ class CRF(Layer):
                 mask = self.in_mask # self._inbound_nodes[0].input_masks[0]
                 nloglik = self.get_negative_log_likelihood(y_true, X, mask)
                 return nloglik
+            loss.__name__ = "negative_log_likelihood"
             return loss
         else:
             if self.sparse_target:

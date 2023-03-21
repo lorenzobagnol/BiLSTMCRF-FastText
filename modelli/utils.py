@@ -2,11 +2,9 @@
 Utility functions.
 """
 import math
-import os
 from collections import Counter
-
 import numpy as np
-from keras.utils import Sequence, get_file
+from keras.utils import Sequence
 
 class NERSequence(Sequence):
 
