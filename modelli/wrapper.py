@@ -2,11 +2,8 @@
 Wrapper class.
 """
 from seqeval.metrics import f1_score
-import modelli.models
-import importlib
-importlib.reload(modelli.models)
 from modelli.models import Bi
-from keras.models import  load_model
+import os
 
 from modelli.preprocessing import IndexTransformer
 from modelli.tagger import Tagger
@@ -126,16 +123,11 @@ class Sequence(object):
 
         return self.tagger.analyze(text)
 
-    def save(self, model_file, model_json, preprocessor_file):
+    def save(self, model_file, preprocessor_file):
         self.p.save(preprocessor_file)
-        self.model.save( model_file)
+        self.model.save_weights(model_file)
 
-    @classmethod
-    def load(cls, model_folder, model_json, preprocessor_file):
-        self = cls()
+    def load(self, model_file, preprocessor_file):
         self.p = IndexTransformer.load(preprocessor_file)
-        # self.model = model_from_json(open(model_json).read())
-        # self.model.load_weights(os.path.join(os.path.dirname(model_folder), 'model_weights.h5'))
-        self.model = load_model(filepath=model_folder, compile=False) # , custom_objects= {'negative_log_likelihood': CRF.loss_function })
-
+        self.model.load_weights(model_file)
         return self

@@ -298,29 +298,24 @@ class Bi(Model):
     def call(self, inputs, training=None):
 
         word_embeddings=self.word_embeddings(inputs[0])         # shape=(batch_size, num_words, 100)
-        print("word_embedding", word_embeddings)
         word_mask = self.word_embeddings.compute_mask(inputs[0])
         
         if self._use_char:
             
             char_embeddings=self.char_embeddings(inputs[1])     # shape=(batch_size, num_words, num_char, 25)
-            print("char_embedding", char_embeddings)
             char_mask=self.char_embeddings.compute_mask(inputs[1])
+            
             bilstm_char_mask=self.char_bilstm.compute_mask(char_embeddings,mask=char_mask)          
             char_embeddings=self.char_bilstm(char_embeddings, training=training, mask=char_mask)    # shape=(batch_size, num_words, 50)
-            print("char_blstm", char_embeddings)
             char_mask=bilstm_char_mask
+            
             mask=self.concat.compute_mask([word_embeddings, char_embeddings],[word_mask, char_mask])
             word_embeddings = self.concat([word_embeddings, char_embeddings])                   # shape=(batch_size, num_words, 150)
-            print("concatenation", word_embeddings)
             
         word_embeddings=self.dropout(word_embeddings, training=training)        # shape=(batch_size, num_words, 150)
-        print("dropout",word_embeddings)
         z=self.bilstm(word_embeddings, training=training)           # shape=(batch_size, num_words, 200)
         mask=self.bilstm.compute_mask(word_embeddings,mask)
-        print("bilstm",z)
         z=self.dense(z)             # shape=(batch_size, num_words, 100)
-        print("dense",z)
         if self._use_crf:
             pred=self.last_layer(z, mask=mask, training=training)           # shape=(batch_size, num_words, num_labels)
         else:
